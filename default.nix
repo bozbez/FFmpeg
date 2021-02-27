@@ -9,7 +9,7 @@ let
 
       enableLto = true;
     }).overrideAttrs (old: {
-      src = ./ffmpeg;
+      src = ./.;
       version = "next";
 
       configureFlags = super.lib.remove "--disable-libwavpack" old.configureFlags;
