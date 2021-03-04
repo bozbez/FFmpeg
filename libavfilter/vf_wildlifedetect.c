@@ -30,6 +30,10 @@
 #include "avfilter.h"
 #include "internal.h"
 
+#if CONFIG_LIBGPIOD
+#include <gpiod.h>
+#endif
+
 typedef struct WildlifeDetectContext {
     const AVClass *class;
 
@@ -37,6 +41,16 @@ typedef struct WildlifeDetectContext {
     int nb_threads;
 
     AVFrame *prev_frame;
+
+#if CONFIG_LIBGPIOD
+    int gpio;
+
+    char* gpio_chip_path;
+    unsigned gpio_line_num;
+
+    struct gpiod_chip *gpio_chip;
+    struct gpiod_line *gpio_line;
+#endif
 
     int energy_threshold;
     int noise_threshold;
@@ -51,6 +65,20 @@ typedef struct WildlifeDetectContext {
 #define FLAGS AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
 
 static const AVOption wildlifedetect_options[] = {
+#if CONFIG_LIBGPIOD
+    { "gpio", "enable GPIO status LED",
+       OFFSET(gpio),
+       AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, FLAGS },
+
+    { "gpio_chip_path", "set the GPIO chip path",
+       OFFSET(gpio_chip_path),
+       AV_OPT_TYPE_STRING, { .str = "/dev/gpiochip0" }, 0, 0, FLAGS },
+
+    { "gpio_line_num", "set the GPIO line of the status LED",
+       OFFSET(gpio_line_num),
+       AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT32_MAX, FLAGS },
+#endif
+
     { "energy_threshold", "set the wildlife energy threshold",
        OFFSET(energy_threshold),
        AV_OPT_TYPE_INT, { .i64 = 10000 }, 0, INT32_MAX, FLAGS },
@@ -110,6 +138,26 @@ static int config_input(AVFilterLink *inlink)
 
     av_log(s, AV_LOG_VERBOSE, "energy_threshold:%d noise_threshold:%d\n",
            s->energy_threshold, s->noise_threshold);
+
+#if CONFIG_LIBGPIOD
+    if (!s->gpio) return 0;
+
+    s->gpio_chip = gpiod_chip_open(s->gpio_chip_path);
+    if (!s->gpio_chip)
+        return AVERROR(ENODEV);
+
+    s->gpio_line = gpiod_chip_get_line(s->gpio_chip, s->gpio_line_num);
+    if (!s->gpio_line) {
+        gpiod_chip_close(s->gpio_chip);
+        return AVERROR(ENODEV);
+    }
+
+    if (gpiod_line_request_output(s->gpio_line, "vf_wildlifedetect", 0) < 0) {
+        gpiod_line_release(s->gpio_line);
+        gpiod_chip_close(s->gpio_chip);
+        return AVERROR(ENODEV);
+    }
+#endif
 
     return 0;
 }
@@ -190,9 +238,21 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *cur_frame)
 
     if (s->rem_frames > 0) {
         s->rem_frames--;
+
+#if CONFIG_LIBGPIOD
+        if (s->gpio && gpiod_line_set_value(s->gpio_line, 1) < 0)
+            return AVERROR(EIO);
+#endif
+
         return ff_filter_frame(ctx->outputs[0], cur_frame);
     } else if (s->rem_frames == 0) {
         s->rem_frames--;
+
+#if CONFIG_LIBGPIOD
+        if (s->gpio && gpiod_line_set_value(s->gpio_line, 0) < 0)
+            return AVERROR(EIO);
+#endif
+
         av_dict_set(meta, "lavfi.wildlifedetect.end",
                     av_ts2timestr(cur_frame->pts, &s->time_base), 0);
     }
@@ -207,6 +267,13 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     av_freep(&s->th_energy);
     av_frame_free(&s->prev_frame);
+
+#if CONFIG_LIBGPIOD
+    if (!s->gpio) return;
+
+    gpiod_line_release(s->gpio_line);
+    gpiod_chip_close(s->gpio_chip);
+#endif
 }
 
 static const AVFilterPad wildlifedetect_inputs[] = {
