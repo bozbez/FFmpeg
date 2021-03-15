@@ -40,6 +40,9 @@ typedef struct WildlifeDetectContext {
     AVRational time_base;
     int nb_threads;
 
+    uint64_t vpts;
+    uint64_t prev_rpts;
+
     AVFrame *prev_frame;
 
 #if CONFIG_LIBGPIOD
@@ -130,6 +133,7 @@ static int config_input(AVFilterLink *inlink)
     s->time_base = inlink->time_base;
     s->nb_threads = ff_filter_get_nb_threads(ctx);
 
+    s->vpts = 0;
     s->rem_frames = -1;
 
     s->th_energy = av_calloc(s->nb_threads, sizeof(*s->th_energy));
@@ -172,7 +176,7 @@ static int energy_counter(AVFilterContext *ctx, void *arg,
 
     const int linesize = cur_frame->linesize[0];
 
-    const int width = cur_frame->width;
+    const int width  = cur_frame->width;
     const int height = cur_frame->height;
 
     const int start = (height *  jobnr     ) / nb_jobs;
@@ -209,10 +213,11 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *cur_frame)
     AVDictionary **meta = &cur_frame->metadata;
 
     if (!s->prev_frame) {
+        s->prev_rpts = cur_frame->pts;
         s->prev_frame = av_frame_clone(cur_frame);
-        av_frame_free(&cur_frame);
 
-        return 0;
+        cur_frame->pts = s->vpts;
+        return ff_filter_frame(ctx->outputs[0], cur_frame);
     }
 
     ctx->internal->execute(ctx, energy_counter, cur_frame, NULL,
@@ -244,6 +249,13 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *cur_frame)
             return AVERROR(EIO);
 #endif
 
+        s->vpts += cur_frame->pts - s->prev_rpts;
+        s->prev_rpts = cur_frame->pts;
+        cur_frame->pts = s->vpts;
+
+        av_log(ctx, AV_LOG_DEBUG, "frame:%"PRId64" vpts:%s\n",
+               inlink->frame_count_out, av_ts2str(cur_frame->pts));
+
         return ff_filter_frame(ctx->outputs[0], cur_frame);
     } else if (s->rem_frames == 0) {
         s->rem_frames--;
@@ -257,7 +269,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *cur_frame)
                     av_ts2timestr(cur_frame->pts, &s->time_base), 0);
     }
 
+    s->prev_rpts = cur_frame->pts;
     av_frame_free(&cur_frame);
+
     return 0;
 }
 

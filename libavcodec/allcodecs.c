@@ -782,6 +782,7 @@ extern AVCodec ff_libaom_av1_decoder;
 extern AVCodec ff_av1_decoder;
 extern AVCodec ff_av1_cuvid_decoder;
 extern AVCodec ff_av1_qsv_decoder;
+extern AVCodec ff_cedrus264_encoder;
 extern AVCodec ff_libopenh264_encoder;
 extern AVCodec ff_libopenh264_decoder;
 extern AVCodec ff_h264_amf_encoder;

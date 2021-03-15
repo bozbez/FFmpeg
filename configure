@@ -238,7 +238,7 @@ External library support:
   --enable-libfribidi      enable libfribidi, improves drawtext filter [no]
   --enable-libglslang      enable GLSL->SPIRV compilation via libglslang [no]
   --enable-libgme          enable Game Music Emu via libgme [no]
-  --enable-libgpio         enable GPIO via libgpiod [no]
+  --enable-libgpiod        enable GPIO via libgpiod [no]
   --enable-libgsm          enable GSM de/encoding via libgsm [no]
   --enable-libiec61883     enable iec61883 via libiec61883 [no]
   --enable-libilbc         enable iLBC de/encoding via libilbc [no]
